@@ -1,58 +1,138 @@
-import { useState } from 'react';
-import { Chatbot } from "supersimpledev";
-import LoadingSpinner from '../assets/loading-spinner.gif';
-import "./ChatInput.css"
-export function ChatInput({chatMessages, setChatMessages}) {
-  const [inputText, setInputText] = useState("");
-    
-     function saveInputText(event){
-          setInputText(event.target.value);
-        }
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { Chatbot } from 'supersimpledev';
+import './ChatInput.css';
 
-        async function sendMessage(){
-          setInputText('');
+export function ChatInput({ chatMessages, setChatMessages, isLoading, setIsLoading, pendingPrompt, setPendingPrompt }) {
+  const [inputText, setInputText] = useState('');
+  const textareaRef = useRef(null);
 
-          const newChatMessages = [
-              ...chatMessages,
-              {
-                message: inputText,
-                sender: "user",
-                id: crypto.randomUUID()
-              }];
+  // When a suggestion card is clicked, populate the input and focus it
+  useEffect(() => {
+    if (pendingPrompt) {
+      setInputText(pendingPrompt);
+      setPendingPrompt('');
+      setTimeout(() => { textareaRef.current?.focus(); adjustTextareaHeight(); }, 0);
+    }
+  }, [pendingPrompt, setPendingPrompt]);
 
-               setChatMessages([
-            ...newChatMessages,
-                {
-                  message: <img src={LoadingSpinner} className="loading-spinner" />,
-                  sender: 'robot',
-                  id: crypto.randomUUID()
-                }
-              ]);
 
-              const response = await Chatbot.getResponseAsync(inputText);
+  const adjustTextareaHeight = () => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+    }
+  };
 
-              setChatMessages([
-              ...newChatMessages,
-              {
-                message: response,
-                sender: "robot",
-                id: crypto.randomUUID()
-              }]);
-        }
+  const handleInput = (e) => {
+    setInputText(e.target.value);
+    adjustTextareaHeight();
+  };
 
-        return (
-          <div className="chat-input-container">
-            <input 
-              placeholder="Send a message to Chatbot" 
-              size="30"
-              onChange={saveInputText}
-              value={inputText}
-              className="chat-input"
-            />
-            <button onClick={sendMessage}
-            className="send-button"
-            >Send
+  const sendMessage = useCallback(async () => {
+    const trimmed = inputText.trim();
+    if (!trimmed || isLoading) return;
+
+    setInputText('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+
+    const userMsg = {
+      message: trimmed,
+      sender: 'user',
+      id: crypto.randomUUID(),
+      timestamp: new Date(),
+    };
+
+    const loadingMsg = {
+      message: 'loading',
+      sender: 'robot',
+      id: crypto.randomUUID(),
+      isLoading: true,
+      timestamp: new Date(),
+    };
+
+    const withUser = [...chatMessages, userMsg];
+    setChatMessages([...withUser, loadingMsg]);
+    setIsLoading(true);
+
+    try {
+      const response = await Chatbot.getResponseAsync(trimmed);
+      setChatMessages([
+        ...withUser,
+        {
+          message: response,
+          sender: 'robot',
+          id: crypto.randomUUID(),
+          timestamp: new Date(),
+        },
+      ]);
+    } catch {
+      setChatMessages([
+        ...withUser,
+        {
+          message: '⚠️ Something went wrong. Please try again.',
+          sender: 'robot',
+          id: crypto.randomUUID(),
+          timestamp: new Date(),
+          isError: true,
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [inputText, isLoading, chatMessages, setChatMessages, setIsLoading]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const canSend = inputText.trim().length > 0 && !isLoading;
+
+  return (
+    <div className="chat-input-area">
+      <div className="chat-input-inner">
+        {/* Typing indicator */}
+        <div className={`typing-indicator ${isLoading ? '' : 'hidden'}`}>
+          <span>🤖</span>
+          NexusAI is thinking…
+        </div>
+
+        <div className={`chat-input-box${isLoading ? ' disabled' : ''}`}>
+          <textarea
+            ref={textareaRef}
+            className="chat-input-field"
+            placeholder="Ask NexusAI anything…"
+            value={inputText}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            rows={1}
+            disabled={isLoading}
+            id="chat-input-field"
+          />
+          <div className="input-actions">
+            <button
+              className="send-btn"
+              onClick={sendMessage}
+              disabled={!canSend}
+              aria-label="Send message"
+              id="send-message-btn"
+            >
+              ➤
             </button>
           </div>
-        );
-      }
+        </div>
+
+        <div className="input-footer">
+          <span className="input-footer-text">
+            Press <strong>Enter</strong> to send · <strong>Shift+Enter</strong> for new line
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
